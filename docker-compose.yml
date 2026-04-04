@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_PRIVATE_KEY_PATH=/secrets/github-app.pem
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://preflight:preflight@db:5432/preflight
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on:
+      - redis
+      - db
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A app.worker worker --loglevel=info --concurrency=2
+    environment:
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_PRIVATE_KEY_PATH=/secrets/github-app.pem
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://preflight:preflight@db:5432/preflight
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on:
+      - redis
+      - db
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: preflight
+      POSTGRES_PASSWORD: preflight
+      POSTGRES_DB: preflight
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

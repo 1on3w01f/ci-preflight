@@ -1,0 +1,24 @@
+# Core
+gitpython
+pyyaml
+
+# Web server
+fastapi
+uvicorn[standard]
+
+# Async job queue
+celery[redis]
+redis
+
+# Database
+psycopg2-binary
+sqlalchemy
+
+# GitHub API
+httpx
+PyJWT
+cryptography
+
+# Dev / test
+pytest
+ruff
