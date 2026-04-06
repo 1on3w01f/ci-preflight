@@ -22,6 +22,7 @@ from sqlalchemy import func
 from app.database import init_db, SessionLocal
 from app.models import Installation, Repository, PredictionRecord, CIOutcome
 from app.tasks import run_preflight
+from app.ado_routes import router as ado_router
 
 logger = logging.getLogger("ci_preflight.app")
 
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CI Preflight", version="0.1.0", lifespan=lifespan)
+app.include_router(ado_router)
 
 
 # ---------------------------------------------------------------------------

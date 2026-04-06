@@ -1,26 +1,25 @@
 """
 Celery tasks for CI Preflight.
 
-run_preflight is the core task:
-  1. Get a GitHub installation access token
-  2. Post an "in_progress" check run so the PR shows a spinner immediately
-  3. Fetch the PR diff from GitHub
-  4. Parse the diff → ChangeSet
-  5. Run all registered checks → List[Prediction]
-  6. Persist each prediction to DB (for accuracy tracking)
-  7. Build a human-readable report
-  8. Update the check run with pass / fail conclusion
+run_preflight        — GitHub: token → check run spinner → diff → engine → check run result
+run_preflight_ado    — ADO:    PAT → PR status pending → changed files → engine → PR status result
+
+Both tasks share the same engine (_run_checks) and persistence (_save_predictions).
 """
 
 import logging
+import os
 
 from app.worker import celery_app
-from app import github
+from app import github, ado
 from app.database import SessionLocal
 from app.models import PredictionRecord
+from ci_preflight.diff_parser import from_file_list
 from ci_preflight.diff_parser import from_diff_text
 from ci_preflight import dependency_contract
 from ci_preflight.reporter import render
+
+ADO_PAT = os.environ.get("ADO_PAT", "")
 
 logger = logging.getLogger("ci_preflight.tasks")
 
@@ -127,5 +126,87 @@ def run_preflight(self, installation_id: int, repo_full_name: str, pr_number: in
                 )
             except Exception:
                 pass
+
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(
+    bind=True,
+    name="ci_preflight.run_preflight_ado",
+    max_retries=2,
+    default_retry_delay=30,
+)
+def run_preflight_ado(
+    self,
+    org: str,
+    project: str,
+    repo_id: str,
+    repo_name: str,
+    pr_id: int,
+    head_sha: str,
+):
+    """
+    Run CI Preflight checks on an ADO pull request and post the result as a PR status.
+    """
+    repo_full_name = f"{org}/{project}/{repo_name}"
+    pat = ADO_PAT
+
+    if not pat:
+        logger.error("ADO_PAT not configured — cannot process ADO PR #%s", pr_id)
+        return
+
+    try:
+        # Post "pending" status immediately so the PR shows CI is running
+        ado.post_pr_status(
+            org, project, repo_id, pr_id, pat,
+            state=ado.PENDING,
+            description="CI Preflight is analysing your changes...",
+        )
+
+        # Fetch changed files via ADO Iterations API
+        changed_files = ado.get_pr_changed_files(org, project, repo_id, pr_id, pat)
+        changeset = from_file_list(changed_files)
+
+        logger.info(
+            "ADO PR #%s on %s — %d file(s) changed",
+            pr_id, repo_full_name, len(changed_files),
+        )
+
+        predictions = _run_checks(changeset)
+
+        # Persist predictions — use pr_id as pr_number, installation_id=0 for ADO
+        _save_predictions(0, repo_full_name, pr_id, head_sha, predictions)
+
+        # Post final status
+        if not predictions:
+            ado.post_pr_status(
+                org, project, repo_id, pr_id, pat,
+                state=ado.SUCCEEDED,
+                description="CI Preflight: all clear — no contract violations found.",
+            )
+        else:
+            high = [p for p in predictions if p.severity() == "HIGH"]
+            count = len(predictions)
+            description = (
+                f"CI Preflight: {count} risk(s) found"
+                + (f" — {len(high)} HIGH severity, merge blocked." if high else ".")
+            )
+            ado.post_pr_status(
+                org, project, repo_id, pr_id, pat,
+                state=ado.FAILED if high else ado.SUCCEEDED,
+                description=description,
+            )
+
+    except Exception as exc:
+        logger.exception("run_preflight_ado failed for ADO PR #%s on %s", pr_id, repo_full_name)
+
+        try:
+            ado.post_pr_status(
+                org, project, repo_id, pr_id, pat,
+                state=ado.ERROR,
+                description=f"CI Preflight encountered an error: {exc}",
+            )
+        except Exception:
+            pass
 
         raise self.retry(exc=exc)

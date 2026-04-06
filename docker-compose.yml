@@ -20,6 +20,9 @@ services:
       - GITHUB_PRIVATE_KEY_PATH=/secrets/github-app.pem
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://preflight:preflight@db:5432/preflight
+      - ADO_PAT=${ADO_PAT:-}
+      - ADO_WEBHOOK_USER=${ADO_WEBHOOK_USER:-}
+      - ADO_WEBHOOK_PASSWORD=${ADO_WEBHOOK_PASSWORD:-}
     volumes:
       - ./secrets:/secrets:ro
     depends_on:
@@ -36,6 +39,9 @@ services:
       - GITHUB_PRIVATE_KEY_PATH=/secrets/github-app.pem
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://preflight:preflight@db:5432/preflight
+      - ADO_PAT=${ADO_PAT:-}
+      - ADO_WEBHOOK_USER=${ADO_WEBHOOK_USER:-}
+      - ADO_WEBHOOK_PASSWORD=${ADO_WEBHOOK_PASSWORD:-}
     volumes:
       - ./secrets:/secrets:ro
     depends_on:
