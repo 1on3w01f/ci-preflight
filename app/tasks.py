@@ -7,14 +7,17 @@ run_preflight is the core task:
   3. Fetch the PR diff from GitHub
   4. Parse the diff → ChangeSet
   5. Run all registered checks → List[Prediction]
-  6. Build a human-readable report
-  7. Update the check run with pass / fail conclusion
+  6. Persist each prediction to DB (for accuracy tracking)
+  7. Build a human-readable report
+  8. Update the check run with pass / fail conclusion
 """
 
 import logging
 
 from app.worker import celery_app
 from app import github
+from app.database import SessionLocal
+from app.models import PredictionRecord
 from ci_preflight.diff_parser import from_diff_text
 from ci_preflight import dependency_contract
 from ci_preflight.reporter import render
@@ -55,6 +58,26 @@ def _build_check_output(predictions):
     return conclusion, title, summary, text
 
 
+def _save_predictions(installation_id, repo_full_name, pr_number, head_sha, predictions):
+    """Persist predictions to DB so they can be matched against CI outcomes later."""
+    if not predictions:
+        return
+    with SessionLocal() as db:
+        for p in predictions:
+            db.add(PredictionRecord(
+                installation_id=installation_id,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                check_type=p.violated_contract,
+                failure_type=p.failure_type,
+                confidence=p.confidence,
+                severity=p.severity(),
+            ))
+        db.commit()
+    logger.info("Saved %d prediction(s) for %s#%s", len(predictions), repo_full_name, pr_number)
+
+
 @celery_app.task(
     bind=True,
     name="ci_preflight.run_preflight",
@@ -83,14 +106,16 @@ def run_preflight(self, installation_id: int, repo_full_name: str, pr_number: in
         )
 
         predictions = _run_checks(changeset)
-        conclusion, title, summary, text = _build_check_output(predictions)
 
+        # Persist predictions before posting — data is valuable even if posting fails
+        _save_predictions(installation_id, repo_full_name, pr_number, head_sha, predictions)
+
+        conclusion, title, summary, text = _build_check_output(predictions)
         github.update_check_run(token, owner, repo, check_run_id, conclusion, title, summary, text)
 
     except Exception as exc:
         logger.exception("run_preflight failed for PR #%s on %s", pr_number, repo_full_name)
 
-        # Mark the check as failed so the PR isn't left with a dangling spinner
         if check_run_id:
             try:
                 token = github.get_installation_token(installation_id)
@@ -101,6 +126,6 @@ def run_preflight(self, installation_id: int, repo_full_name: str, pr_number: in
                     summary=f"An internal error occurred: `{exc}`",
                 )
             except Exception:
-                pass  # best-effort; don't mask the original exception
+                pass
 
         raise self.retry(exc=exc)

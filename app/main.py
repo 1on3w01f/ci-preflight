@@ -2,9 +2,10 @@
 CI Preflight — GitHub App webhook server.
 
 Handles:
-  - pull_request events → enqueue preflight check
-  - installation events → record/remove installs in DB
-  - installation_repositories events → track repo additions/removals
+  - pull_request events       → enqueue preflight check
+  - check_suite.completed     → record actual CI outcome (for accuracy tracking)
+  - installation events       → record/remove installs in DB
+  - installation_repositories → track repo additions/removals
 """
 
 import hashlib
@@ -16,14 +17,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import func
 
-from app.database import init_db, get_db, SessionLocal
-from app.models import Installation, Repository
+from app.database import init_db, SessionLocal
+from app.models import Installation, Repository, PredictionRecord, CIOutcome
 from app.tasks import run_preflight
 
 logger = logging.getLogger("ci_preflight.app")
 
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
 
 
 @asynccontextmanager
@@ -46,7 +49,7 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# Installs overview (simple debug endpoint — lock this down before public launch)
+# Installs overview
 # ---------------------------------------------------------------------------
 
 @app.get("/installs")
@@ -63,6 +66,73 @@ async def list_installs():
             }
             for i in installs
         ]
+
+
+# ---------------------------------------------------------------------------
+# Accuracy stats
+# ---------------------------------------------------------------------------
+
+@app.get("/stats")
+async def stats():
+    """
+    Join predictions to CI outcomes to show true/false positive rates per check type.
+    A prediction is a true positive when CI failed on that commit.
+    A prediction is a false positive when CI passed on that commit.
+    """
+    with SessionLocal() as db:
+        rows = (
+            db.query(
+                PredictionRecord.check_type,
+                PredictionRecord.severity,
+                CIOutcome.conclusion,
+                func.count().label("count"),
+            )
+            .join(
+                CIOutcome,
+                (CIOutcome.repo_full_name == PredictionRecord.repo_full_name)
+                & (CIOutcome.head_sha == PredictionRecord.head_sha),
+            )
+            .group_by(
+                PredictionRecord.check_type,
+                PredictionRecord.severity,
+                CIOutcome.conclusion,
+            )
+            .all()
+        )
+
+        total_predictions = db.query(func.count(PredictionRecord.id)).scalar()
+        total_outcomes = db.query(func.count(CIOutcome.id)).scalar()
+        matched = db.query(func.count(PredictionRecord.id)).join(
+            CIOutcome,
+            (CIOutcome.repo_full_name == PredictionRecord.repo_full_name)
+            & (CIOutcome.head_sha == PredictionRecord.head_sha),
+        ).scalar()
+
+        breakdown = {}
+        for check_type, severity, conclusion, count in rows:
+            key = f"{check_type} ({severity})"
+            if key not in breakdown:
+                breakdown[key] = {"true_positives": 0, "false_positives": 0, "other": 0}
+            if conclusion == "failure":
+                breakdown[key]["true_positives"] += count
+            elif conclusion == "success":
+                breakdown[key]["false_positives"] += count
+            else:
+                breakdown[key]["other"] += count
+
+        # Add accuracy % per check type
+        for key, counts in breakdown.items():
+            tp = counts["true_positives"]
+            fp = counts["false_positives"]
+            total = tp + fp
+            counts["accuracy"] = f"{round(tp / total * 100)}%" if total > 0 else "n/a"
+
+        return {
+            "total_predictions": total_predictions,
+            "total_outcomes_recorded": total_outcomes,
+            "matched": matched,
+            "breakdown": breakdown,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +153,9 @@ async def github_webhook(
 
     if event == "pull_request":
         return _handle_pull_request(payload)
+
+    if event == "check_suite":
+        return _handle_check_suite(payload)
 
     if event == "installation":
         return _handle_installation(payload)
@@ -113,6 +186,53 @@ def _handle_pull_request(payload: dict) -> JSONResponse:
     return JSONResponse({"queued": True, "pr": pr_number})
 
 
+def _handle_check_suite(payload: dict) -> JSONResponse:
+    """
+    Record the actual CI outcome for a commit.
+    Ignores check suites from CI Preflight itself (would be circular).
+    Only records completed suites with a definitive conclusion.
+    """
+    action = payload.get("action", "")
+    if action != "completed":
+        return JSONResponse({"skipped": True, "action": action})
+
+    suite = payload["check_suite"]
+    conclusion = suite.get("conclusion")
+    if conclusion not in ("success", "failure", "timed_out", "cancelled"):
+        return JSONResponse({"skipped": True, "conclusion": conclusion})
+
+    # Skip our own check suite to avoid circular labeling
+    suite_app_id = str(suite.get("app", {}).get("id", ""))
+    if suite_app_id == GITHUB_APP_ID:
+        return JSONResponse({"skipped": True, "reason": "own check suite"})
+
+    head_sha = suite["head_sha"]
+    repo_full_name = payload["repository"]["full_name"]
+    ci_app_name = suite.get("app", {}).get("name", "unknown")
+
+    with SessionLocal() as db:
+        # One outcome per (repo, sha) — first CI system to complete wins
+        existing = db.query(CIOutcome).filter_by(
+            repo_full_name=repo_full_name,
+            head_sha=head_sha,
+        ).first()
+
+        if not existing:
+            db.add(CIOutcome(
+                repo_full_name=repo_full_name,
+                head_sha=head_sha,
+                conclusion=conclusion,
+                ci_app_name=ci_app_name,
+            ))
+            db.commit()
+            logger.info(
+                "CI outcome recorded: %s %s → %s (via %s)",
+                repo_full_name, head_sha[:7], conclusion, ci_app_name,
+            )
+
+    return JSONResponse({"recorded": True, "conclusion": conclusion})
+
+
 def _handle_installation(payload: dict) -> JSONResponse:
     action = payload.get("action", "")
     install_data = payload["installation"]
@@ -128,7 +248,6 @@ def _handle_installation(payload: dict) -> JSONResponse:
             )
             db.add(install)
 
-            # Store any repos included at install time
             for repo in payload.get("repositories", []):
                 db.add(Repository(
                     id=repo["id"],
