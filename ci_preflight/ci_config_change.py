@@ -62,7 +62,7 @@ def check(changeset: ChangeSet) -> List[Prediction]:
             failure_type="pipeline_definition_error",
             violated_contract="ci_config_stability_contract",
             signals=signals,
-            confidence=0.80,
+            confidence=0.40,  # informational — correlation only, not causal
             impact_stage="pipeline_startup",
             recommendation=(
                 "Review the pipeline YAML carefully before merging. "

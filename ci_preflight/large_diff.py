@@ -23,10 +23,10 @@ def check(changeset: ChangeSet) -> List[Prediction]:
         return []
 
     if count >= THRESHOLD_HIGH:
-        confidence = 0.80
+        confidence = 0.40  # informational — correlation only, not causal
         severity_label = "very large"
     else:
-        confidence = 0.60
+        confidence = 0.30  # informational — correlation only, not causal
         severity_label = "large"
 
     signals = [
