@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.database import init_db, SessionLocal
 from app.models import PredictionRecord, CIOutcome
 from ci_preflight.diff_parser import from_file_list
-from ci_preflight import dependency_contract, ci_config_change, large_diff
+from ci_preflight import dependency_contract, ci_config_change, large_diff, nuget_lock_contract
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -73,6 +73,7 @@ def run_checks(files: list[str]):
     changeset = from_file_list(files)
     predictions = []
     predictions.extend(dependency_contract.check(changeset))
+    predictions.extend(nuget_lock_contract.check(changeset))
     predictions.extend(ci_config_change.check(changeset))
     predictions.extend(large_diff.check(changeset))
     return predictions
