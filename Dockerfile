@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source
 COPY ci_preflight/ ./ci_preflight/
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
 EXPOSE 8000
 

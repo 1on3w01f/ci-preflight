@@ -16,7 +16,8 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from pathlib import Path
 from sqlalchemy import func
 
 from app.database import init_db, SessionLocal
@@ -39,6 +40,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CI Preflight", version="0.1.0", lifespan=lifespan)
 app.include_router(ado_router)
+
+_LANDING_PAGE = (Path(__file__).parent / "static" / "index.html").read_text()
+
+
+@app.get("/", response_class=HTMLResponse)
+async def landing():
+    return _LANDING_PAGE
 
 
 # ---------------------------------------------------------------------------
