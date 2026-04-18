@@ -9,6 +9,10 @@ class ChangeSet:
     This is the raw input the engine reasons over.
     """
     changed_files: List[str] = field(default_factory=list)
+    # Files removed in this changeset (populated from full diff text only)
+    deleted_files: List[str] = field(default_factory=list)
+    # True if the diff contains unresolved merge conflict markers
+    has_conflict_markers: bool = False
 
     def has_file(self, filename: str) -> bool:
         return filename in self.changed_files
