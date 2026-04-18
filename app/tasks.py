@@ -23,6 +23,7 @@ from ci_preflight import (
     nuget_lock_contract,
     submodule_drift,
     missing_migration,
+    test_deletion,
     ci_config_change,
     large_diff,
 )
@@ -41,6 +42,7 @@ def _run_checks(changeset):
     predictions.extend(nuget_lock_contract.check(changeset))
     predictions.extend(submodule_drift.check(changeset))
     predictions.extend(missing_migration.check(changeset))
+    predictions.extend(test_deletion.check(changeset))
     predictions.extend(ci_config_change.check(changeset))
     predictions.extend(large_diff.check(changeset))
     return predictions

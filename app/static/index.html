@@ -166,7 +166,8 @@
       margin-top: 2px;
     }
     .tag-high { background: rgba(248,81,73,0.2); color: var(--red); }
-    .tag-low { background: rgba(210,153,34,0.2); color: var(--yellow); }
+    .tag-med  { background: rgba(88,166,255,0.15); color: var(--blue); }
+    .tag-low  { background: rgba(210,153,34,0.2); color: var(--yellow); }
     .check-text { color: var(--text); }
     .check-fix { color: var(--muted); font-size: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
     .check-fix span { color: var(--accent-hover); }
@@ -336,13 +337,18 @@
           CI Preflight — 1 issue found · just now
         </div>
         <div class="mockup-body">
-          <div class="check-title">⚠ Failure predicted — fix before pushing</div>
+          <div class="check-title">⚠ 2 issues found — fix before pushing</div>
           <div class="check-row">
             <span class="tag tag-high">HIGH</span>
-            <span class="check-text">package.json was modified but package-lock.json was not updated.<br>The CI runner will resolve different package versions than your local environment.</span>
+            <span class="check-text">Unresolved merge conflict markers detected in src/auth.ts.<br>This will cause an immediate syntax error — CI fails before tests run.</span>
+          </div>
+          <div style="margin: 8px 0 8px 0; border-top: 1px solid var(--border);"></div>
+          <div class="check-row">
+            <span class="tag tag-high">HIGH</span>
+            <span class="check-text">package.json modified but package-lock.json not updated.<br>CI runner will resolve different package versions than your local environment.</span>
           </div>
           <div class="check-fix">
-            Fix: <span>Run `npm install` and commit the updated package-lock.json</span>
+            Fix: <span>Resolve conflict markers · run `npm install` · commit both files</span>
           </div>
         </div>
       </div>
@@ -381,7 +387,7 @@
   <div class="container">
     <div class="section-label">What it catches</div>
     <h2>The most common avoidable failures — flagged instantly.</h2>
-    <p class="section-sub">Each check has a clear causal link to a CI failure. When CI Preflight flags something, it explains exactly why the build will fail and what to do about it.</p>
+    <p class="section-sub">Each HIGH and MEDIUM check has a clear causal link to a CI failure. When CI Preflight flags something, it explains exactly why the build will fail and what to do about it.</p>
     <div class="table-wrap">
       <table class="checks-table">
         <thead>
@@ -393,19 +399,44 @@
         </thead>
         <tbody>
           <tr>
+            <td class="name">merge_conflict</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+            <td class="desc">Unresolved Git conflict markers (&lt;&lt;&lt;&lt;&lt;&lt;&lt;, &gt;&gt;&gt;&gt;&gt;&gt;&gt;) left in the diff. Causes an immediate syntax error — the build will fail before any tests run.</td>
+          </tr>
+          <tr>
+            <td class="name">secrets_committed</td>
+            <td><span class="tag tag-high">HIGH</span></td>
+            <td class="desc">Private keys, .env files, credentials.json, .pem files, or other secret material included in the PR. Secret scanners will block the pipeline immediately.</td>
+          </tr>
+          <tr>
             <td class="name">dependency_lock_contract</td>
             <td><span class="tag tag-high">HIGH</span></td>
-            <td class="desc">package.json, go.mod, or requirements.txt changed without updating the corresponding lockfile. The CI runner will resolve different package versions than you tested with.</td>
+            <td class="desc">package.json, go.mod, or requirements.txt changed without updating the lockfile. The CI runner will resolve different package versions than you tested with.</td>
           </tr>
           <tr>
             <td class="name">nuget_lock_contract</td>
             <td><span class="tag tag-high">HIGH</span></td>
-            <td class="desc">A .csproj or .vbproj was modified but packages.lock.json was not updated. Affects .NET projects using RestoreLockedMode.</td>
+            <td class="desc">A .csproj or .vbproj modified without updating packages.lock.json. Affects .NET projects using RestoreLockedMode — build fails at restore.</td>
+          </tr>
+          <tr>
+            <td class="name">submodule_drift</td>
+            <td><span class="tag tag-med">MED</span></td>
+            <td class="desc">.gitmodules changed — a submodule URL or path was added, removed, or updated. CI fails at the checkout stage if the new submodule isn't accessible from the runner.</td>
+          </tr>
+          <tr>
+            <td class="name">missing_migration</td>
+            <td><span class="tag tag-med">MED</span></td>
+            <td class="desc">A database model or schema file changed (Django, Prisma, TypeORM, Rails, Sequelize) without a corresponding migration file. DB schema will be out of sync — test suite fails.</td>
+          </tr>
+          <tr>
+            <td class="name">test_deletion</td>
+            <td><span class="tag tag-med">MED</span></td>
+            <td class="desc">Test files were deleted (pytest, Jest, Go, JUnit, RSpec, xUnit). Coverage thresholds in CI will fail if total coverage drops below the configured minimum.</td>
           </tr>
           <tr>
             <td class="name">ci_config_change</td>
             <td><span class="tag tag-low">LOW</span></td>
-            <td class="desc">The pipeline YAML was edited. Informational — CI config changes have a higher-than-average chance of causing a startup failure.</td>
+            <td class="desc">Pipeline YAML edited (.github/workflows, azure-pipelines.yml). Informational — CI config changes have an elevated chance of causing a startup failure.</td>
           </tr>
           <tr>
             <td class="name">diff_size_contract</td>
