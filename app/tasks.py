@@ -16,7 +16,15 @@ from app.database import SessionLocal
 from app.models import PredictionRecord
 from ci_preflight.diff_parser import from_file_list
 from ci_preflight.diff_parser import from_diff_text
-from ci_preflight import dependency_contract, ci_config_change, large_diff, nuget_lock_contract
+from ci_preflight import (
+    dependency_contract,
+    nuget_lock_contract,
+    submodule_drift,
+    missing_migration,
+    secrets_committed,
+    ci_config_change,
+    large_diff,
+)
 from ci_preflight.reporter import render
 
 ADO_PAT = os.environ.get("ADO_PAT", "")
@@ -28,6 +36,9 @@ def _run_checks(changeset):
     predictions = []
     predictions.extend(dependency_contract.check(changeset))
     predictions.extend(nuget_lock_contract.check(changeset))
+    predictions.extend(submodule_drift.check(changeset))
+    predictions.extend(missing_migration.check(changeset))
+    predictions.extend(secrets_committed.check(changeset))
     predictions.extend(ci_config_change.check(changeset))
     predictions.extend(large_diff.check(changeset))
     return predictions
